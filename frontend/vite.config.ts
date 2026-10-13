@@ -55,9 +55,9 @@ export default defineConfig(({ mode }) => {
                 purpose: 'any',
               },
               {
-                src: '/favicon.png',
-                sizes: '512x512',
-                type: 'image/png',
+                src: '/favicon.svg',
+                sizes: 'any',
+                type: 'image/svg+xml',
                 purpose: 'any',
               },
               {
