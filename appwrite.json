@@ -1,0 +1,102 @@
+{
+  "projectId": "YOUR_ACTUAL_PROJECT_ID",
+  "functions": [
+    {
+      "functionId": "backend-api",
+      "name": "Backend API & Frontend Server",
+      "runtime": "node-22.0",
+      "path": ".",
+      "entrypoint": "backend/src/appwrite-entry.js",
+      "commands": "npm run appwrite-build",
+      "ignore": [
+        "frontend/node_modules",
+        ".git",
+        ".github",
+        ".jules",
+        "README.md"
+      ],
+      "trigger": "http",
+      "events": [],
+      "schedule": "",
+      "timeout": 120,
+      "env": [
+        {
+          "key": "NODE_ENV",
+          "value": "production",
+          "required": true
+        },
+        {
+          "key": "MONGODB_URI",
+          "value": "",
+          "required": true
+        },
+        {
+          "key": "JWT_ACCESS_SECRET",
+          "value": "",
+          "required": true
+        },
+        {
+          "key": "JWT_REFRESH_SECRET",
+          "value": "",
+          "required": true
+        },
+        {
+          "key": "RESEND_API_KEY",
+          "value": "",
+          "required": true
+        },
+        {
+          "key": "APP_URL",
+          "value": "",
+          "required": false,
+          "description": "Your Appwrite deployment URL"
+        },
+        {
+          "key": "RAZORPAY_KEY_ID",
+          "value": "",
+          "required": false
+        },
+        {
+          "key": "RAZORPAY_KEY_SECRET",
+          "value": "",
+          "required": false
+        },
+        {
+          "key": "R2_ENDPOINT",
+          "value": "",
+          "required": false
+        },
+        {
+          "key": "R2_ACCESS_KEY_ID",
+          "value": "",
+          "required": false
+        },
+        {
+          "key": "R2_SECRET_ACCESS_KEY",
+          "value": "",
+          "required": false
+        },
+        {
+          "key": "R2_PUBLIC_URL",
+          "value": "",
+          "required": false
+        },
+        {
+          "key": "R2_BUCKET_NAME",
+          "value": "",
+          "required": false
+        },
+        {
+          "key": "RATE_LIMIT_WINDOW_MS",
+          "value": "900000",
+          "required": false
+        },
+        {
+          "key": "RATE_LIMIT_MAX",
+          "value": "5000",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

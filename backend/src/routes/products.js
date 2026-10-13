@@ -1,0 +1,326 @@
+const express = require('express');
+const { z } = require('zod');
+const validate = require('../middleware/validate');
+const Product = require('../models/Product');
+const auth = require('../middleware/auth');
+const adminOnly = require('../middleware/admin');
+
+const Category = require('../models/Category');
+const Brand = require('../models/Brand');
+
+const router = express.Router();
+const LIST_FIELDS = 'title artistName productType category brand images imageVariants price compareAtPrice stock isFeatured isCustomizable enableSizes sizes enableColors colors minDeliveryDays maxDeliveryDays tags salesCount createdAt';
+const SHORT_CACHE = 'no-store';
+const MEDIUM_CACHE = 'no-store';
+
+router.get('/categories', async (req, res, next) => {
+  try {
+    const categories = await Category.find({ isActive: true }).sort({ name: 1 }).lean();
+    res.set('Cache-Control', 'no-cache');
+    res.json(categories);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/brands', async (req, res, next) => {
+  try {
+    const brands = await Brand.find({ isActive: true }).sort({ name: 1 }).lean();
+    res.set('Cache-Control', 'no-cache');
+    res.json(brands);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/tags', async (req, res, next) => {
+  try {
+    const tags = await Product.distinct('tags', { isActive: true });
+    res.set('Cache-Control', 'no-cache');
+    res.json(tags.filter(t => t));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/product-types', async (req, res, next) => {
+  try {
+    const types = await Product.distinct('productType', { isActive: true });
+    res.set('Cache-Control', 'no-cache');
+    res.json(types.filter(t => t));
+  } catch (error) {
+    next(error);
+  }
+});
+
+const listSchema = z.object({
+  body: z.object({}),
+  query: z.object({
+    q: z.string().optional(),
+    category: z.string().optional(),
+    brand: z.string().optional(),
+    productType: z.string().optional(),
+    tag: z.string().optional(),
+    minPrice: z.coerce.number().optional(),
+    maxPrice: z.coerce.number().optional(),
+    inStock: z.string().optional(),
+    isFeatured: z.string().optional(),
+    sort: z.string().optional(),
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(100).default(12),
+  }),
+  params: z.object({}),
+});
+
+router.get('/', validate(listSchema), async (req, res, next) => {
+  try {
+    const { q, category, brand, productType, tag, minPrice, maxPrice, inStock, isFeatured, sort, page, limit } = req.validated.query;
+    const query = { isActive: true };
+
+    if (q) {
+      query.$text = { $search: q };
+    }
+    if (category) {
+      query.category = category;
+    }
+    if (brand) {
+      query.brand = brand;
+    }
+    if (productType) {
+      query.productType = productType;
+    }
+    if (tag) {
+      query.tags = tag;
+    }
+    if (minPrice !== undefined || maxPrice !== undefined) {
+      query.price = {};
+      if (minPrice !== undefined) query.price.$gte = minPrice;
+      if (maxPrice !== undefined) query.price.$lte = maxPrice;
+    }
+    if (inStock === 'true') {
+      query.stock = { $gt: 0 };
+    } else if (inStock === 'false') {
+      query.stock = { $lte: 0 };
+    }
+    if (isFeatured === 'true') {
+      query.isFeatured = true;
+    } else if (isFeatured === 'false') {
+      query.isFeatured = false;
+    }
+
+    let sortQuery = { createdAt: -1 };
+    if (sort === 'price_asc') sortQuery = { price: 1 };
+    else if (sort === 'price_desc') sortQuery = { price: -1 };
+    else if (sort === 'newest') sortQuery = { createdAt: -1 };
+    else if (sort === 'best_selling' || sort === 'most_popular') sortQuery = { salesCount: -1, createdAt: -1 };
+
+    const [products, total] = await Promise.all([
+      Product.find(query)
+        .select(LIST_FIELDS)
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .sort(sortQuery)
+        .lean(),
+      Product.countDocuments(query),
+    ]);
+
+    if (req.headers.authorization) {
+      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    } else {
+      res.set('Cache-Control', SHORT_CACHE);
+    }
+    res.json({ products, page, limit, total, totalPages: Math.ceil(total / limit) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:id', async (req, res, next) => {
+  try {
+    const product = await Product.findById(req.params.id).lean();
+    if (!product) {
+      const err = new Error('Product not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (req.headers.authorization) {
+      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    } else {
+      res.set('Cache-Control', MEDIUM_CACHE);
+    }
+    res.json(product);
+  } catch (error) {
+    next(error);
+  }
+});
+
+const createSchema = z.object({
+  body: z.object({
+    title: z.string().min(2),
+    description: z.string().min(10),
+    artistName: z.string().optional().or(z.literal("")),
+    productType: z.string().optional().or(z.literal("")),
+    category: z.string().optional().or(z.literal("")),
+    brand: z.string().optional(),
+    images: z.array(z.string().url()).default([]),
+    imageVariants: z.array(
+      z.object({
+        thumbnail: z.string().url().optional(),
+        thumbnailWidth: z.number().int().positive().optional(),
+        card: z.string().url().optional(),
+        cardWidth: z.number().int().positive().optional(),
+        product: z.string().url().optional(),
+        productWidth: z.number().int().positive().optional(),
+      })
+    ).default([]),
+    r2ImageKeys: z.array(z.string()).default([]),
+    price: z.number().nonnegative(),
+    compareAtPrice: z.number().nonnegative().optional(),
+    stock: z.number().int().nonnegative().default(0),
+    tags: z.array(z.string()).default([]),
+    isFeatured: z.boolean().default(false),
+    isCustomizable: z.boolean().default(false),
+    enableSizes: z.boolean().default(false),
+    sizes: z.array(z.string()).default([]),
+    enableColors: z.boolean().default(false),
+    colors: z.array(z.string()).default([]),
+    minDeliveryDays: z.number().int().min(1).optional(),
+    maxDeliveryDays: z.number().int().min(1).optional(),
+  }),
+  query: z.object({}),
+  params: z.object({}),
+});
+
+router.post('/', auth, adminOnly, validate(createSchema), async (req, res, next) => {
+  try {
+    const product = await Product.create(req.validated.body);
+    res.status(201).json(product);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put('/:id', auth, adminOnly, validate(createSchema), async (req, res, next) => {
+  try {
+    const updated = await Product.findByIdAndUpdate(req.params.id, req.validated.body, { new: true });
+    if (!updated) {
+      const err = new Error('Product not found');
+      err.statusCode = 404;
+      throw err;
+    }
+    res.json(updated);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/:id', auth, adminOnly, async (req, res, next) => {
+  try {
+    const deleted = await Product.findByIdAndDelete(req.params.id);
+    if (!deleted) {
+      const err = new Error('Product not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    // R2 cleanup
+    const keysToDelete = [];
+    if (deleted.r2ImageKeys && deleted.r2ImageKeys.length > 0) {
+      for (const key of deleted.r2ImageKeys) {
+        if (!key || key.startsWith('http')) continue;
+        if (!key.includes('.')) {
+          // It's likely an assetId from the variant generator
+          keysToDelete.push(`products/${key}/thumbnail.webp`);
+          keysToDelete.push(`products/${key}/card.webp`);
+          keysToDelete.push(`products/${key}/product.webp`);
+        } else {
+          // Standard key
+          keysToDelete.push(key);
+        }
+      }
+    }
+
+    // Await deletion to guarantee completion in a serverless function lifecycle
+    if (keysToDelete.length > 0) {
+      const { deleteFromR2 } = require('../utils/r2');
+      try {
+        // Run them concurrently, bounded to the array size which is usually small.
+        await Promise.all(keysToDelete.map(k => deleteFromR2(k)));
+      } catch (e) {
+        // We log the error but still return success for the DB deletion.
+        console.error('Failed to cleanup R2 assets on product deletion:', e);
+      }
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+const patchSchema = z.object({
+  body: z.object({
+    isFeatured: z.boolean()
+  }),
+  params: z.object({
+    id: z.string()
+  })
+});
+
+const uploadCustomImage = require('multer')({
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB
+});
+const { uploadToR2, getObjectUrl, isR2Configured } = require('../utils/r2');
+const { validateImage, optimizeImage } = require('../utils/imageOptimizer');
+const { nanoid } = require('nanoid');
+
+// Adding 'auth' rate limiting to this route natively could be considered for Phase 12,
+// but adding 'auth' ensures only registered users can upload images, which prevents basic abuse.
+router.post('/upload-custom', auth, uploadCustomImage.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: { code: 'API_ERROR', message: 'No file uploaded' } });
+    }
+
+    if (!isR2Configured()) {
+      return res.status(500).json({ error: { code: 'API_ERROR', message: 'Storage is not configured on the server. Image upload is disabled.' } });
+    }
+
+    // Explicitly validate the file bytes to ensure it is actually an image and not a malicious payload
+    await validateImage(req.file.buffer);
+
+    const optimized = await optimizeImage(req.file.buffer);
+
+    const folder = 'custom-uploads';
+    const assetId = nanoid();
+    const key = `${folder}/${assetId}.webp`;
+
+    await uploadToR2(optimized.buffer, optimized.mimeType, `${assetId}.webp`, folder, '', key);
+    const url = getObjectUrl(key);
+
+    res.json({ key, url });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/:id/featured', auth, adminOnly, validate(patchSchema), async (req, res, next) => {
+  try {
+    const updated = await Product.findByIdAndUpdate(
+      req.params.id,
+      { isFeatured: req.validated.body.isFeatured },
+      { new: true }
+    );
+    if (!updated) {
+      const err = new Error('Product not found');
+      err.statusCode = 404;
+      throw err;
+    }
+    res.json(updated);
+  } catch (error) {
+    next(error);
+  }
+});
+
+module.exports = router;

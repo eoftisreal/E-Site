@@ -1,0 +1,47 @@
+const mongoose = require('mongoose');
+
+const productSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true, trim: true },
+    description: { type: String, required: true, trim: true },
+    artistName: { type: String, trim: true },
+    productType: { type: String, trim: true },
+    category: { type: String, trim: true, index: true },
+    brand: { type: String, trim: true, index: true },
+    images: [{ type: String }],
+    imageVariants: [{
+      thumbnail: { type: String },
+      thumbnailWidth: { type: Number },
+      card: { type: String },
+      cardWidth: { type: Number },
+      product: { type: String },
+      productWidth: { type: Number }
+    }],
+    r2ImageKeys: [{ type: String }],
+    price: { type: Number, required: true, min: 0 },
+    compareAtPrice: { type: Number, min: 0 },
+    currency: { type: String, default: 'INR' },
+    stock: { type: Number, default: 0, min: 0 },
+    salesCount: { type: Number, default: 0 },
+    tags: [{ type: String }],
+    isActive: { type: Boolean, default: true },
+    isFeatured: { type: Boolean, default: false },
+    isCustomizable: { type: Boolean, default: false },
+    enableSizes: { type: Boolean, default: false },
+    sizes: [{ type: String }],
+    enableColors: { type: Boolean, default: false },
+    colors: [{ type: String }],
+    minDeliveryDays: { type: Number, min: 1 },
+    maxDeliveryDays: { type: Number, min: 1 },
+  },
+  { timestamps: true }
+);
+
+productSchema.index({ title: 'text', description: 'text', tags: 'text', artistName: 'text' });
+productSchema.index({ productType: 1 });
+productSchema.index({ isActive: 1, createdAt: -1 });
+productSchema.index({ isActive: 1, category: 1, createdAt: -1 });
+productSchema.index({ isActive: 1, isFeatured: 1, createdAt: -1 });
+productSchema.index({ stock: 1 });
+
+module.exports = mongoose.model('Product', productSchema);

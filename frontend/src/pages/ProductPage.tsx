@@ -1,0 +1,345 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { apiGet, Product } from '@/lib/api';
+import AddToCartButton from '@/components/AddToCartButton';
+import BuyNowButton from '@/components/BuyNowButton';
+import { inventoryQueryOptions } from '@/lib/stock';
+import WishlistButton from '@/components/WishlistButton';
+import SEO from '@/components/SEO';
+import { X, Check } from 'lucide-react';
+import { getAuthToken } from '@/lib/storage';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+
+const apiBase = import.meta.env.VITE_API_URL || '/api';
+
+import { useParams } from 'react-router-dom';
+
+export default function ProductDetailPage() {
+  const { id } = useParams();
+
+  const { data: product, isLoading: loading } = useQuery<Product>({
+    ...inventoryQueryOptions,
+    queryKey: ['product', id],
+    queryFn: () => apiGet<Product>(`/products/${id}`),
+    enabled: !!id
+  });
+
+  if (!id) return <p>Invalid product</p>;
+
+  const [activeImage, setActiveImage] = useState<string>('');
+
+  const [customImageFile, setCustomImageFile] = useState<File | null>(null);
+  const [customImagePreview, setCustomImagePreview] = useState<string>('');
+  const [uploadingCustom, setUploadingCustom] = useState(false);
+  const [customImageUrl, setCustomImageUrl] = useState<string>('');
+
+  const [selectedSize, setSelectedSize] = useState<string>('');
+  const [selectedColor, setSelectedColor] = useState<string>('');
+
+  useEffect(() => {
+    if (product) {
+      if (product.images && product.images.length > 0 && !activeImage) {
+        setActiveImage(product.images[0]);
+      }
+      if (product.enableSizes && product.sizes && product.sizes.length > 0 && !selectedSize) {
+        setSelectedSize(product.sizes[0]);
+      }
+      if (product.enableColors && product.colors && product.colors.length > 0 && !selectedColor) {
+        setSelectedColor(product.colors[0]);
+      }
+    }
+  }, [product, activeImage, selectedSize, selectedColor]);
+
+  if (loading) {
+    return (
+      <>
+        <SEO
+          title="Loading Product..."
+          description="Please wait while we load this product"
+          noindex={true}
+        />
+        <p className="rounded-md bg-white p-6 border border-secondary-bg">Loading product...</p>
+      </>
+    );
+  }
+
+  if (!product) {
+    return (
+      <>
+        <SEO
+          title="Product Not Found"
+          description="The product you are looking for doesn't exist"
+          noindex={true}
+        />
+        <p className="rounded-md bg-white p-6 border border-secondary-bg">Product not found.</p>
+      </>
+    );
+  }
+
+  // Prepare SEO data for product
+  const seoTitle = `${product.title}${product.artistName ? ` - ${product.artistName}` : ''} | Kapda Kraft`;
+  const seoDescription = product.description
+    ? product.description.substring(0, 160)
+    : `Buy ${product.title} at Kapda Kraft. Premium quality clothing and accessories.`;
+
+  const productImageUrl = activeImage || (product.images && product.images[0]) || '/logo.png';
+
+  const productImages = product.images || ['/logo.png'];
+
+  // Prepare breadcrumbs
+  const breadcrumbs = [
+    { name: 'Home', url: 'https://kapdakraft.live/' },
+    { name: 'Products', url: 'https://kapdakraft.live/products' },
+    { name: product.category || 'Category', url: `https://kapdakraft.live/products?category=${encodeURIComponent(product.category)}` },
+    { name: product.title, url: `https://kapdakraft.live/products/${id}` },
+  ];
+
+  // Prepare product schema
+  const productSchema = {
+    name: product.title,
+    description: seoDescription,
+    image: productImages,
+    price: product.price,
+    currency: 'INR',
+    availability: product.stock > 0 ? 'InStock' : 'OutOfStock',
+    sku: product._id,
+    brand: product.artistName || 'Kapda Kraft',
+  };
+
+  const handleCustomImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setCustomImageFile(file);
+      setCustomImagePreview(URL.createObjectURL(file));
+      setCustomImageUrl('');
+    }
+  };
+
+  const handleCustomUploadConfirm = async () => {
+    if (!customImageFile) return;
+    setUploadingCustom(true);
+
+    const formData = new FormData();
+    formData.append('file', customImageFile);
+    formData.append('folder', 'customers/product-images');
+
+    try {
+      const token = getAuthToken();
+      const res = await fetch(`${apiBase}/products/upload-custom`, {
+        method: 'POST',
+        headers: { ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setCustomImageUrl(data.url);
+      } else {
+        alert((data.error?.message || data.message) || 'Image upload failed');
+      }
+    } catch (err) {
+      alert('Upload failed due to network error');
+    } finally {
+      setUploadingCustom(false);
+    }
+  };
+
+  const handleCustomUploadCancel = () => {
+    setCustomImageFile(null);
+    setCustomImagePreview('');
+    setCustomImageUrl('');
+  };
+
+  const gallery = product.images.length > 0 ? product.images : ['https://placehold.co/300x300?text=Preview'];
+  const galleryThumbnails = product.imageVariants && product.imageVariants.length > 0 ? product.imageVariants.map((v: any, i: number) => v.thumbnail || product.images[i]) : gallery;
+  const galleryProducts = product.imageVariants && product.imageVariants.length > 0 ? product.imageVariants.map((v: any, i: number) => v.product || product.images[i]) : gallery;
+
+  const currentImage = activeImage ? (galleryProducts[gallery.indexOf(activeImage)] || activeImage) : (galleryProducts[0] || gallery[0] || 'https://placehold.co/700x700?text=Art');
+
+  return (
+    <>
+      <SEO
+        title={seoTitle}
+        description={seoDescription}
+        image={productImageUrl}
+        url={`https://kapdakraft.live/products/${id}`}
+        type="product"
+        keywords={[
+          product.title,
+          product.artistName || 'clothing',
+          product.category || 'fashion',
+          'shopping',
+          'online store',
+        ]}
+        breadcrumbs={breadcrumbs}
+        product={productSchema}
+        canonical={`https://kapdakraft.live/products/${id}`}
+      />
+      <div className="grid gap-8 md:grid-cols-2">
+        <div className="space-y-4 overflow-hidden">
+        <img src={currentImage} srcSet={product.imageVariants && product.imageVariants[gallery.indexOf(activeImage || gallery[0])] ? (() => {
+          const variant = product.imageVariants[gallery.indexOf(activeImage || gallery[0])];
+          if (!variant || Object.keys(variant).length === 0) return undefined;
+
+          const parts = [];
+          if (variant.thumbnail && variant.thumbnailWidth) parts.push(`${variant.thumbnail} ${variant.thumbnailWidth}w`);
+          else if (variant.thumbnail) parts.push(`${variant.thumbnail} 400w`);
+
+          if (variant.card && variant.cardWidth) parts.push(`${variant.card} ${variant.cardWidth}w`);
+          else if (variant.card) parts.push(`${variant.card} 800w`);
+
+          if (variant.product && variant.productWidth) parts.push(`${variant.product} ${variant.productWidth}w`);
+          else if (variant.product) parts.push(`${variant.product} 1600w`);
+
+          return parts.length > 0 ? parts.join(', ') : undefined;
+        })() : undefined} sizes="(max-width: 768px) 100vw, 50vw" loading="eager" decoding="sync" fetchPriority="high" alt={product.title} className="aspect-square w-full rounded-md object-cover" />
+        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin">
+          {gallery.map((image, index) => (
+            <img
+              key={`${image}-${index}`}
+              src={galleryThumbnails[index] || image || 'https://placehold.co/300x300?text=Preview'}
+              loading="lazy" decoding="async"
+              alt={`${product.title} preview ${index + 1}`}
+              onClick={() => setActiveImage(image)}
+              className={`aspect-square w-24 shrink-0 cursor-pointer rounded-lg object-cover border-2 transition-all ${activeImage === image ? 'border-foreground' : 'border-transparent hover:border-slate-300'}`}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="space-y-4">
+        <h1 className="text-3xl font-black">{product.title}</h1>
+        {product.artistName && <p className="text-slate-600">By {product.artistName}</p>}
+
+        {product.tags && product.tags.length > 0 && (
+          <div className="flex flex-wrap gap-2 pt-2">
+            {product.tags.map((tag: string, idx: number) => (
+              <span key={idx} className="bg-foreground text-white text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider ">
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+        <p className="text-2xl font-bold">₹{product.price}</p>
+        <div className="prose prose-sm prose-slate max-w-none prose-headings:font-heading prose-headings:font-bold prose-a:text-blue-600">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+            {product.description}
+          </ReactMarkdown>
+        </div>
+        <p className="text-sm text-slate-500">Stock: {product.stock}</p>
+
+        {product.minDeliveryDays && product.maxDeliveryDays && (
+          <p className="text-sm font-medium text-foreground bg-secondary-bg px-3 py-2 rounded-md border border-border inline-block">
+            🚚 Deliver in {product.minDeliveryDays} to {product.maxDeliveryDays} days
+          </p>
+        )}
+
+        {product.enableSizes && product.sizes && product.sizes.length > 0 && (
+          <div className="pt-4 border-t border-border">
+            <h3 className="font-bold mb-2">Size</h3>
+            <div className="flex flex-wrap gap-2">
+              {product.sizes.map(s => (
+                <button
+                  key={s}
+                  onClick={() => setSelectedSize(s)}
+                  className={`border px-4 py-2 text-sm font-medium rounded transition-colors ${selectedSize === s ? 'border-foreground bg-foreground text-white' : 'border-slate-300 hover:border-slate-500'}`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {product.enableColors && product.colors && product.colors.length > 0 && (
+          <div className="pt-4 border-t border-border">
+            <h3 className="font-bold mb-2">Color</h3>
+            <div className="flex flex-wrap gap-3">
+              {product.colors.map(c => (
+                <button
+                  key={c}
+                  onClick={() => setSelectedColor(c)}
+                  className={`w-8 h-8 rounded-full border-2 transition-all ${selectedColor === c ? 'border-foreground shadow-sm scale-110' : 'border-transparent hover:scale-105'}`}
+                  style={{ backgroundColor: c.toLowerCase() }}
+                  title={c}
+                  aria-label={`Select ${c}`}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {product.isCustomizable ? (
+          <div className="space-y-4 pt-4 border-t border-border">
+            <h3 className="font-bold">Customize Product</h3>
+            {!customImagePreview ? (
+              <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:bg-slate-50 transition-colors">
+                <p className="text-sm text-slate-600 mb-2">Upload an image to customize this product</p>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleCustomImageSelect}
+                  className="text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-foreground file:text-white hover:file:bg-black cursor-pointer w-full max-w-xs mx-auto block"
+                />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="relative inline-block border rounded p-1 bg-white">
+                  <img src={customImagePreview} alt="Custom design preview" className="h-40 w-auto object-contain rounded" />
+                  {!customImageUrl && (
+                    <div className="absolute top-2 right-2 flex gap-2">
+                      <button
+                        onClick={handleCustomUploadCancel}
+                        className="p-1.5 bg-white text-foreground rounded-full shadow hover:bg-secondary-bg transition-colors"
+                        title="Discard Image"
+                        disabled={uploadingCustom}
+                      >
+                        <X size={18} />
+                      </button>
+                      <button
+                        onClick={handleCustomUploadConfirm}
+                        className="p-1.5 bg-foreground text-white rounded-full shadow hover:bg-black transition-colors"
+                        title="Confirm Image"
+                        disabled={uploadingCustom}
+                      >
+                        <Check size={18} />
+                      </button>
+                    </div>
+                  )}
+                  {uploadingCustom && (
+                    <div className="absolute inset-0 bg-white/50 backdrop-blur-sm flex items-center justify-center rounded">
+                      <p className="font-semibold text-sm">Uploading...</p>
+                    </div>
+                  )}
+                </div>
+                {customImageUrl && (
+                  <div className="text-foreground text-sm font-semibold flex items-center gap-1">
+                    <Check size={16} /> Image confirmed!
+                  </div>
+                )}
+              </div>
+            )}
+
+            {customImageUrl && (
+              <div className="pt-2 flex items-center gap-2 flex-wrap">
+                <AddToCartButton productId={product._id} title={product.title} price={product.price} stock={product.stock} image={product.images?.[0]} customImage={customImageUrl} size={selectedSize} color={selectedColor} />
+                <BuyNowButton product={product} customImage={customImageUrl} size={selectedSize} color={selectedColor} />
+                <WishlistButton productId={product._id} className="w-12 h-12 !p-0 flex-shrink-0 border border-border bg-transparent shadow-none" />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="pt-4 border-t border-border flex items-center gap-2 flex-wrap">
+            <AddToCartButton productId={product._id} title={product.title} price={product.price} stock={product.stock} image={product.images?.[0]} size={selectedSize} color={selectedColor} />
+            <BuyNowButton product={product} size={selectedSize} color={selectedColor} />
+            <WishlistButton productId={product._id} className="w-12 h-12 !p-0 flex-shrink-0 border border-border bg-transparent shadow-none" />
+          </div>
+        )}
+
+      </div>
+    </div>
+    </>
+  );
+}
