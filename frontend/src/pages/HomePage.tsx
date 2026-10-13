@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import ProductCard from '@/components/ProductCard';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet, Product } from '@/lib/api';
