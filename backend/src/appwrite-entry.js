@@ -63,6 +63,14 @@ module.exports = async ({ req, res, log, error }) => {
       error(`MongoDB connection failed: ${dbErr.message}`);
     });
 
+    // Scheduled executions arrive as POST /, which is not a website route.
+    // This HTTP-serving function has no scheduled jobs; acknowledge the tick
+    // after starting the server/DB connection, without forwarding it to Express.
+    // This is a liveness acknowledgement, not a database readiness check.
+    if (req.headers?.['x-appwrite-trigger'] === 'schedule') {
+      return res.json({ ok: true, trigger: 'schedule' }, 200);
+    }
+
     const bodyBuffer =
       req.bodyBinary && req.bodyBinary.length ? req.bodyBinary : undefined;
 
