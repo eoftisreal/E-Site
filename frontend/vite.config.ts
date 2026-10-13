@@ -16,14 +16,26 @@ export default defineConfig(({ mode }) => {
       fastRefresh: !isProduction,
     }),
     tailwindcss(),
-    ...(enablePwa
-      ? [VitePWA({
+    VitePWA({
+          // Keep sw.js available when PWA is disabled so old installations
+          // unregister themselves instead of serving a previous deployment.
+          selfDestroying: !enablePwa,
+          // Only existing workers need retirement; do not register a retiring
+          // worker on every visit (which would keep navigating the page).
+          injectRegister: enablePwa ? 'auto' : false,
           registerType: 'autoUpdate',
           workbox: {
             cleanupOutdatedCaches: true,
             skipWaiting: true,
             clientsClaim: true,
-
+            // Navigations must check the deployment, not a precached index.html.
+            globIgnores: ['**/*.html'],
+            navigateFallback: null,
+            runtimeCaching: [{
+              urlPattern: ({ request }) => request.mode === 'navigate',
+              handler: 'NetworkFirst',
+              options: { cacheName: 'kapdakraft-pages' },
+            }],
           },
           devOptions: {
             enabled: !isProduction,
@@ -56,8 +68,7 @@ export default defineConfig(({ mode }) => {
               },
             ],
           },
-        })]
-      : []),
+        }),
     // Add compression plugin
     compression({
       algorithm: 'brotliCompress',

@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { getAuthToken, clearAuth } from '@/lib/storage';
+import { getAuthToken, clearAuth, TOKEN_KEY } from '@/lib/storage';
+import { Heart } from 'lucide-react';
 import { parseJwt } from '@/lib/jwt';
 import { useCartStore } from '@/store/cart';
 import { useWishlistStore } from '@/store/wishlist';
@@ -9,7 +10,7 @@ const linkClass = 'text-sm font-medium text-secondary-text hover:text-foreground
 
 export default function Header() {
   const navigate = useNavigate();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(getAuthToken()));
   const [isAdmin, setIsAdmin] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { items, fetchCart, clearLocalCart } = useCartStore();
@@ -47,9 +48,15 @@ export default function Header() {
     };
     checkAuth();
 
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === TOKEN_KEY || event.key === null) checkAuth();
+    };
+
     window.addEventListener('auth-change', checkAuth);
+    window.addEventListener('storage', onStorage);
     return () => {
       window.removeEventListener('auth-change', checkAuth);
+      window.removeEventListener('storage', onStorage);
     };
   }, []);
 
@@ -57,9 +64,7 @@ export default function Header() {
     // Delay loading non-critical data
     const timer = setTimeout(() => {
       fetchCart();
-      if (isAuthenticated) {
-        fetchWishlist();
-      }
+      fetchWishlist();
     }, 100);
     return () => clearTimeout(timer);
   }, [fetchCart, fetchWishlist, isAuthenticated]);
@@ -120,8 +125,8 @@ export default function Header() {
                 <img src="/icons/login.png" alt="Login" className="h-8 w-8 md:h-10 md:w-10 object-contain" loading="eager" />
               </Link>
             )}
-            <Link to="/account#wishlist" className={`${linkClass} flex items-center relative`} title="Wishlist">
-              <img src="/icons/user.png" alt="Wishlist" className="h-8 w-8 md:h-10 md:w-10 object-contain opacity-70" loading="eager" />
+            <Link to="/account#wishlist" className={`${linkClass} flex items-center relative`} title="Wishlist" aria-label="Wishlist">
+              <Heart className="h-8 w-8 md:h-10 md:w-10" strokeWidth={1.5} aria-hidden="true" />
               {wishlistItemCount > 0 && (
                 <span className="absolute -top-1 -right-1 bg-foreground text-background text-[10px] font-bold h-4 w-4 md:h-5 md:w-5 rounded-full flex items-center justify-center">
                   {wishlistItemCount}

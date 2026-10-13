@@ -17,6 +17,7 @@ const sitemapRoutes = require('./routes/sitemap');
 const masterDataRoutes = require('./routes/master-data');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 const path = require('path');
+const { staticCacheControl } = require('./utils/staticCacheControl');
 
 const compressionMiddleware = require('./middleware/compression');
 const cacheMiddleware = require('./middleware/cache');
@@ -135,14 +136,7 @@ if (process.env.NODE_ENV === 'production' || process.env.SERVE_FRONTEND === 'tru
     etag: false,
     // Only cache assets, not HTML
     setHeaders: (res, pathStr) => {
-      const originalPath = pathStr.replace(/\.(br|gz)$/, '');
-      if (originalPath.endsWith('.html')) {
-        res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
-      } else if (originalPath.match(/\.(js|css|woff2?)$/)) {
-        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-      } else {
-        res.setHeader('Cache-Control', 'public, max-age=3600');
-      }
+      res.setHeader('Cache-Control', staticCacheControl(path.relative(frontendPath, pathStr)));
     }
   }));
 
@@ -160,7 +154,7 @@ if (process.env.NODE_ENV === 'production' || process.env.SERVE_FRONTEND === 'tru
     }
 
     // Serve index.html for all other routes (SPA routing)
-    res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+    res.setHeader('Cache-Control', 'no-store');
     res.sendFile(path.join(frontendPath, 'index.html'), (err) => {
       if (err) {
         next(err);
