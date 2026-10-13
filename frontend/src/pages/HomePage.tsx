@@ -39,68 +39,86 @@ export default function Home() {
     heroBannerUrls = [parsedSettings.heroBannerUrl];
   }
 
-  const [currentSlide, setCurrentSlide] = useState(0);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-
-  // Track if user is interacting to pause auto-slide
+  const scrollSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isInteracting = useRef(false);
 
-  // If we have banners, duplicate the first one at the end to create a seamless infinite loop visual
-  const hasBanners = heroBannerUrls && heroBannerUrls.length > 0;
-  const loopBanners = hasBanners ? [...heroBannerUrls, heroBannerUrls[0]] : [];
+  // Keep the clone only when there is more than one banner.
+  const hasBanners = heroBannerUrls.length > 0;
+  const bannerCount = heroBannerUrls.length;
+  const loopBanners = bannerCount > 1 ? [...heroBannerUrls, heroBannerUrls[0]] : heroBannerUrls;
 
-  // Handle auto-slide
+  // A reset must happen only after scrolling has settled. Resetting when the
+  // cloned slide is merely halfway into view can strand desktop browsers
+  // between two banners.
+  const settleScroll = () => {
+    const container = scrollContainerRef.current;
+    if (!container || bannerCount <= 1 || !container.clientWidth) return;
+
+    const slideWidth = container.clientWidth;
+    const cloneOffset = bannerCount * slideWidth;
+    if (Math.abs(container.scrollLeft - cloneOffset) <= 2) {
+      container.scrollTo({ left: 0, behavior: 'instant' as ScrollBehavior });
+    }
+  };
+
+  const handleScroll = () => {
+    if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
+    // Fallback for browsers without the native scrollend event.
+    scrollSettleTimer.current = setTimeout(settleScroll, 180);
+  };
+
   useEffect(() => {
-    if (!heroBannerUrls || heroBannerUrls.length <= 1) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    // Re-align on banner count changes and desktop window resizes.
+    container.scrollTo({ left: 0, behavior: 'instant' as ScrollBehavior });
+    let previousWidth = container.clientWidth;
+    const observer = new ResizeObserver(() => {
+      const nextWidth = container.clientWidth;
+      if (!previousWidth || !nextWidth || previousWidth === nextWidth) return;
+
+      const slide = Math.round(container.scrollLeft / previousWidth);
+      previousWidth = nextWidth;
+      container.scrollTo({
+        left: (slide >= bannerCount ? 0 : slide * nextWidth),
+        behavior: 'instant' as ScrollBehavior
+      });
+    });
+    observer.observe(container);
+    const onScrollEnd = () => {
+      if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
+      settleScroll();
+    };
+    container.addEventListener('scrollend', onScrollEnd);
+    return () => {
+      observer.disconnect();
+      container.removeEventListener('scrollend', onScrollEnd);
+      if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
+    };
+  }, [bannerCount]);
+
+  useEffect(() => {
+    if (bannerCount <= 1) return;
 
     const intervalId = setInterval(() => {
       if (isInteracting.current) return;
+      const container = scrollContainerRef.current;
+      if (!container || !container.clientWidth) return;
+      const position = container.scrollLeft / container.clientWidth;
+      const index = Math.round(position);
 
-      setCurrentSlide((prev) => {
-        const next = prev + 1;
-        if (scrollContainerRef.current) {
-          const container = scrollContainerRef.current;
-          container.scrollTo({
-            left: next * container.clientWidth,
-            behavior: 'smooth'
-          });
-        }
-        return next;
+      // Don't start another transition while a previous one is still moving.
+      if (Math.abs(position - index) > 0.02 || index >= bannerCount) return;
+      container.scrollTo({
+        left: (index + 1) * container.clientWidth,
+        behavior: 'smooth'
       });
     }, 5000);
 
     return () => clearInterval(intervalId);
-  }, [heroBannerUrls]);
-
-  // Handle scroll snap updates and infinite loop logic
-  const handleScroll = () => {
-    if (!scrollContainerRef.current || !hasBanners) return;
-
-    const container = scrollContainerRef.current;
-    const scrollPosition = container.scrollLeft;
-    const slideWidth = container.clientWidth;
-
-    // Calculate which slide is currently most visible
-    const newSlideIndex = Math.round(scrollPosition / slideWidth);
-
-    if (newSlideIndex !== currentSlide) {
-      setCurrentSlide(newSlideIndex);
-
-      // If we've reached the duplicated first slide at the very end
-      if (newSlideIndex === loopBanners.length - 1) {
-        // Wait a tiny bit for the smooth scroll snap to finish visually
-        setTimeout(() => {
-          if (!scrollContainerRef.current) return;
-          // Jump back to the real first slide instantly without animation
-          scrollContainerRef.current.scrollTo({
-            left: 0,
-            behavior: 'instant' as ScrollBehavior // 'instant' is sometimes not in TS types, but works in modern browsers. 'auto' also works instantly.
-          });
-          setCurrentSlide(0);
-        }, 300); // 300ms allows standard snap animation to finish
-      }
-    }
-  };
+  }, [bannerCount]);
 
   return (
     <div className="space-y-10 md:space-y-16 pb-10 md:pb-16">
@@ -125,11 +143,11 @@ export default function Home() {
           <div
             ref={scrollContainerRef}
             onScroll={handleScroll}
-            className="absolute inset-0 z-0 flex overflow-x-auto snap-x snap-mandatory scrollbar-hide"
+            className="absolute inset-0 z-0 flex w-full overflow-x-auto snap-x snap-mandatory overscroll-x-contain scrollbar-hide"
             style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
           >
             {loopBanners.map((url, idx) => (
-              <div key={idx} className="w-full h-full flex-shrink-0 snap-center relative">
+              <div key={idx} className="relative h-full w-full min-w-full shrink-0 snap-center snap-always">
                 <img src={url} alt={`Hero Banner ${idx + 1}`} className="w-full h-full object-cover object-center" loading={idx === 0 ? "eager" : "lazy"} fetchPriority={idx === 0 ? "high" : "auto"} />
               </div>
             ))}
