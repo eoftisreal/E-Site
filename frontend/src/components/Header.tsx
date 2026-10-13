@@ -1,12 +1,16 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { getAuthToken, clearAuth, TOKEN_KEY } from '@/lib/storage';
-import { Heart } from 'lucide-react';
+import { Heart, LogIn, LogOut, Menu, ShoppingCart, UserRound } from 'lucide-react';
 import { parseJwt } from '@/lib/jwt';
 import { useCartStore } from '@/store/cart';
 import { useWishlistStore } from '@/store/wishlist';
 
 const linkClass = 'text-sm font-medium text-secondary-text hover:text-foreground transition-colors tracking-wide';
+
+const iconButtonClass = `${linkClass} relative inline-flex h-8 w-8 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2`;
+const iconClass = 'h-5 w-5 md:h-6 md:w-6';
+const badgeClass = 'pointer-events-none absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-foreground text-background text-[10px] font-bold leading-none inline-flex items-center justify-center';
 
 export default function Header() {
   const navigate = useNavigate();
@@ -81,12 +85,12 @@ export default function Header() {
   return (
     <header className="sticky top-0 z-50 bg-background/95 backdrop-blur-sm border-b border-border shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 md:h-20 gap-4">
+        <div className="flex items-center justify-between h-16 md:h-20 gap-2 sm:gap-4">
 
           {/* Mobile Menu Button */}
           <div className="md:hidden flex items-center flex-1">
-            <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 -ml-2 text-foreground focus:outline-none" title="Menu">
-              <img src="/icons/menu.png" alt="Menu" className="h-10 w-10 object-contain" loading="eager" />
+            <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className={iconButtonClass} title="Menu" aria-label="Menu" aria-expanded={isMobileMenuOpen} aria-controls="mobile-navigation">
+              <Menu className={iconClass} strokeWidth={1.75} aria-hidden="true" />
             </button>
           </div>
 
@@ -106,37 +110,37 @@ export default function Header() {
             />
           </Link>
 
-          <div className="flex items-center justify-end gap-2 sm:gap-4 flex-1">
+          <div className="flex items-center justify-end gap-1 sm:gap-2 flex-1">
             {isAdmin && (
               <Link to="/admin" className={`${linkClass} hidden sm:inline-block`} title="Admin">Admin</Link>
             )}
 
             {isAuthenticated ? (
               <>
-                <Link to="/account" className={`${linkClass} flex items-center`} title="Account">
-                  <img src="/icons/user.png" alt="Account" className="h-8 w-8 md:h-10 md:w-10 object-contain" loading="eager" />
+                <Link to="/account" className={iconButtonClass} title="Account" aria-label="Account">
+                  <UserRound className={iconClass} strokeWidth={1.75} aria-hidden="true" />
                 </Link>
-                <button onClick={handleLogout} className={`${linkClass} flex items-center`} title="Log Out">
-                  <img src="/icons/logout.png" alt="Logout" className="h-8 w-8 md:h-10 md:w-10 object-contain" loading="eager" />
+                <button onClick={handleLogout} className={iconButtonClass} title="Log Out" aria-label="Log Out">
+                  <LogOut className={iconClass} strokeWidth={1.75} aria-hidden="true" />
                 </button>
               </>
             ) : (
-              <Link to="/auth/login" className={`${linkClass} flex items-center`} title="Log In">
-                <img src="/icons/login.png" alt="Login" className="h-8 w-8 md:h-10 md:w-10 object-contain" loading="eager" />
+              <Link to="/auth/login" className={iconButtonClass} title="Log In" aria-label="Log In">
+                <LogIn className={iconClass} strokeWidth={1.75} aria-hidden="true" />
               </Link>
             )}
-            <Link to="/account#wishlist" className={`${linkClass} flex items-center relative`} title="Wishlist" aria-label="Wishlist">
-              <Heart className="h-8 w-8 md:h-10 md:w-10" strokeWidth={1.5} aria-hidden="true" />
+            <Link to="/account#wishlist" className={iconButtonClass} title="Wishlist" aria-label="Wishlist">
+              <Heart className={iconClass} strokeWidth={1.75} aria-hidden="true" />
               {wishlistItemCount > 0 && (
-                <span className="absolute -top-1 -right-1 bg-foreground text-background text-[10px] font-bold h-4 w-4 md:h-5 md:w-5 rounded-full flex items-center justify-center">
+                <span className={badgeClass}>
                   {wishlistItemCount}
                 </span>
               )}
             </Link>
-            <Link to="/cart" className={`${linkClass} flex items-center relative`} title="Cart">
-              <img src="/icons/cart.png" alt="Cart" className="h-9 w-9 md:h-11 md:w-11 object-contain" loading="eager" />
+            <Link to="/cart" className={iconButtonClass} title="Cart" aria-label="Cart">
+              <ShoppingCart className={iconClass} strokeWidth={1.75} aria-hidden="true" />
               {cartItemCount > 0 && (
-                <span className="absolute 0 -right-0 bg-foreground text-background text-[10px] font-bold h-4 w-4 md:h-5 md:w-5 rounded-full flex items-center justify-center">
+                <span className={badgeClass}>
                   {cartItemCount}
                 </span>
               )}
@@ -147,7 +151,7 @@ export default function Header() {
         {/* Mobile Navigation Dropdown */}
         {isMobileMenuOpen && (
           <div className="md:hidden border-t border-border bg-background">
-            <nav className="flex flex-col px-4 py-2">
+            <nav id="mobile-navigation" className="flex flex-col px-4 py-2">
               <Link to="/products" className="py-3 border-b border-border/50 text-sm font-medium text-secondary-text hover:text-foreground" onClick={() => setIsMobileMenuOpen(false)}>Shop</Link>
               <Link to="/products?tag=Collections" className="py-3 border-b border-border/50 text-sm font-medium text-secondary-text hover:text-foreground" onClick={() => setIsMobileMenuOpen(false)}>Collections</Link>
               <Link to="/about" className="py-3 text-sm font-medium text-secondary-text hover:text-foreground" onClick={() => setIsMobileMenuOpen(false)}>About</Link>
