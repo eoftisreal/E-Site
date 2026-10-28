@@ -8,7 +8,14 @@ const adminOnly = require('../middleware/admin');
 const Category = require('../models/Category');
 const Brand = require('../models/Brand');
 
+const { releaseExpiredReservations } = require('../utils/orderTransitions');
 const router = express.Router();
+router.use(async (req, res, next) => {
+  try {
+    if (req.method === 'GET') await releaseExpiredReservations();
+    next();
+  } catch (error) { next(error); }
+});
 const LIST_FIELDS = 'title artistName productType category brand images imageVariants price compareAtPrice stock isFeatured isCustomizable enableSizes sizes enableColors colors minDeliveryDays maxDeliveryDays tags salesCount createdAt';
 const SHORT_CACHE = 'no-store';
 const MEDIUM_CACHE = 'no-store';
@@ -269,7 +276,10 @@ const patchSchema = z.object({
 });
 
 const uploadCustomImage = require('multer')({
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB
+  limits: {
+    fileSize: 5 * 1024 * 1024, files: 1, fields: 2, parts: 3,
+    fieldSize: 16 * 1024, fieldNameSize: 100, fieldNestingDepth: 4,
+  }
 });
 const { uploadToR2, getObjectUrl, isR2Configured } = require('../utils/r2');
 const { validateImage, optimizeImage } = require('../utils/imageOptimizer');

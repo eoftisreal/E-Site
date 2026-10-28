@@ -1,4 +1,4 @@
-import { getAuthToken, getRefreshToken, setAuthToken, clearAuth } from './storage';
+import { getAuthToken, getRefreshToken, setAuthToken, setRefreshToken, clearAuth } from './storage';
 
 export const getApiBaseUrl = (): string => {
   if (import.meta.env.VITE_API_URL) {
@@ -37,6 +37,7 @@ export async function fetchWithAuth(url: string, options: RequestInit = {}): Pro
           }).then(async (refreshResponse) => {
             if (refreshResponse.ok) {
               const data = await refreshResponse.json();
+              setRefreshToken(data.refreshToken);
               setAuthToken(data.accessToken);
               return data.accessToken;
             } else {

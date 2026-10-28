@@ -125,9 +125,9 @@ export default defineConfig(({ mode }) => {
 
           // Heavy libraries
           'lib-three': ['three'],
-          'lib-excel': ['xlsx'],
+          'lib-excel': ['write-excel-file/browser'],
           'lib-canvas': ['html2canvas'],
-          'lib-editor': ['react-quill'],
+          'lib-editor': ['react-quill-new'],
           'lib-qr': ['qrcode.react'],
         },
         // Optimize chunk sizes

@@ -4,7 +4,7 @@ const customLogFormat = (tokens, req, res) => {
   return JSON.stringify({
     timestamp: new Date().toISOString(),
     method: tokens.method(req, res),
-    url: tokens.url(req, res),
+    url: req.path, // Do not persist recovery/auth tokens from URL query strings.
     status: tokens.status(req, res),
     contentLength: tokens.res(req, res, 'content-length'),
     responseTimeMs: tokens['response-time'](req, res),

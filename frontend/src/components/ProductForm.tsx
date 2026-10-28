@@ -4,9 +4,9 @@ import { FormEvent, useState, useEffect } from 'react';
 import { fetchWithAuth } from '@/lib/apiClient';
 import { useQueryClient } from '@tanstack/react-query';
 import { lazy, Suspense } from 'react';
-import 'react-quill/dist/quill.snow.css';
+import 'react-quill-new/dist/quill.snow.css';
 
-const ReactQuill = lazy(() => import('react-quill'));
+const ReactQuill = lazy(() => import('react-quill-new'));
 
 const apiBase = import.meta.env.VITE_API_URL || '/api';
 

@@ -13,6 +13,7 @@ import { getAuthToken } from '@/lib/storage';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
 
 const apiBase = import.meta.env.VITE_API_URL || '/api';
 
@@ -224,7 +225,7 @@ export default function ProductDetailPage() {
         )}
         <p className="text-2xl font-bold">₹{product.price}</p>
         <div className="prose prose-sm prose-slate max-w-none prose-headings:font-heading prose-headings:font-bold prose-a:text-blue-600">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw, rehypeSanitize]}>
             {product.description}
           </ReactMarkdown>
         </div>

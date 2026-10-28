@@ -14,7 +14,7 @@ async function auth(req, _res, next) {
 
     const payload = verifyAccessToken(token);
     const user = await User.findById(payload.sub);
-    if (!user) {
+    if (!user || (payload.ver || 0) !== (user.tokenVersion || 0)) {
       const err = new Error('Invalid access token');
       err.statusCode = 401;
       throw err;

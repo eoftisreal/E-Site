@@ -1,4 +1,6 @@
 const express = require('express');
+const mongoose = require('mongoose');
+const publicUser = require('../utils/publicUser');
 const { z } = require('zod');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
@@ -14,25 +16,22 @@ const { signAccessToken, signRefreshToken, verifyRefreshToken } = require('../ut
 const router = express.Router();
 
 // Helper to generate auth response
-async function generateAuthResponse(user) {
+async function generateAuthResponse(user, session) {
   const accessToken = signAccessToken({
     sub: user.id,
     email: user.email,
     username: user.username,
     role: user.role,
-    isAdmin: user.isAdmin
+    isAdmin: user.isAdmin,
+    ver: user.tokenVersion || 0
   });
-  const refreshTokenString = signRefreshToken({ sub: user.id });
+  const refreshTokenString = signRefreshToken({ sub: user.id, ver: user.tokenVersion || 0 });
 
   // Hash refresh token for storage
   const tokenHash = crypto.createHash('sha256').update(refreshTokenString).digest('hex');
 
   // Store refresh token
-  await RefreshToken.create({
-    userId: user.id,
-    tokenHash,
-    // Model automatically sets expires: 30d
-  });
+  await RefreshToken.create([{ userId: user.id, tokenHash }], session ? { session } : {});
 
   return {
     accessToken,
@@ -177,23 +176,20 @@ router.post('/refresh', validate(refreshSchema), async (req, res, next) => {
 
     const payload = verifyRefreshToken(refreshToken);
     const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
-    const validToken = await RefreshToken.findOne({ tokenHash, userId: payload.sub });
+    const user = await User.findById(payload.sub);
+    if (!user || !user.isVerified || (payload.ver || 0) !== (user.tokenVersion || 0)) {
+      const err = new Error('Invalid refresh token');
+      err.statusCode = 401;
+      throw err;
+    }
+    // Atomic consumption prevents two concurrent refresh requests reusing a token.
+    const validToken = await RefreshToken.findOneAndDelete({ tokenHash, userId: payload.sub });
 
     if (!validToken) {
       const err = new Error('Invalid refresh token');
       err.statusCode = 401;
       throw err;
     }
-
-    const user = await User.findById(payload.sub);
-    if (!user || !user.isVerified) {
-      const err = new Error('User invalid or unverified');
-      err.statusCode = 401;
-      throw err;
-    }
-
-    // Delete old refresh token (rotation)
-    await validToken.deleteOne();
 
     const authData = await generateAuthResponse(user);
     res.json(authData);
@@ -242,25 +238,22 @@ router.post('/magic-link/verify', validate(verifyMagicSchema), async (req, res, 
   try {
     const { token } = req.validated.body;
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-    const record = await MagicLink.findOne({ tokenHash }).populate('userId');
-
-    if (!record || record.consumedAt) {
-      const err = new Error('Magic link is invalid or expired');
-      err.statusCode = 400;
-      throw err;
-    }
-
-    record.consumedAt = new Date();
-    await record.save();
-
-    const user = record.userId;
-    if (!user || !user.isVerified) {
-      const err = new Error('User invalid or unverified');
-      err.statusCode = 401;
-      throw err;
-    }
-
-    const authData = await generateAuthResponse(user);
+    let authData;
+    await mongoose.connection.transaction(async (session) => {
+      // expiresAt historically stores issue time. Keep existing TTL semantics.
+      const record = await MagicLink.findOneAndDelete({
+        tokenHash, consumedAt: null,
+        expiresAt: { $gt: new Date(Date.now() - 15 * 60 * 1000) }
+      }, { session });
+      if (!record) {
+        throw Object.assign(new Error('Magic link is invalid or expired'), { statusCode: 400 });
+      }
+      const user = await User.findById(record.userId).session(session);
+      if (!user || !user.isVerified) {
+        throw Object.assign(new Error('User invalid or unverified'), { statusCode: 401 });
+      }
+      authData = await generateAuthResponse(user, session);
+    });
     res.json(authData);
   } catch (error) {
     next(error);
@@ -314,19 +307,29 @@ router.post('/reset-password', validate(resetPasswordSchema), async (req, res, n
     const { token, newPassword } = req.validated.body;
 
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-    const record = await ResetToken.findOne({ tokenHash }).populate('userId');
-
-    if (!record) {
-      const err = new Error('Reset link is invalid or expired');
-      err.statusCode = 400;
-      throw err;
-    }
-
-    const user = record.userId;
-    user.password = await bcrypt.hash(newPassword, 12);
-    await user.save();
-
-    await record.deleteOne(); // Destroy token after use
+    const password = await bcrypt.hash(newPassword, 12);
+    await mongoose.connection.transaction(async (session) => {
+      const record = await ResetToken.findOneAndDelete({
+        tokenHash, expiresAt: { $gt: new Date(Date.now() - 60 * 60 * 1000) }
+      }, { session });
+      if (!record) {
+        const err = new Error('Reset link is invalid or expired');
+        err.statusCode = 400;
+        throw err;
+      }
+      const user = await User.findByIdAndUpdate(record.userId, {
+        $set: { password }, $inc: { tokenVersion: 1 }
+      }, { session, new: true });
+      if (!user) {
+        const err = new Error('Reset link is invalid or expired');
+        err.statusCode = 400;
+        throw err;
+      }
+      // Version checking also rejects existing access tokens, including /me renewal.
+      await RefreshToken.deleteMany({ userId: user._id }, { session });
+      await MagicLink.deleteMany({ userId: user._id }, { session });
+      await ResetToken.deleteMany({ userId: user._id }, { session });
+    });
 
     res.json({ message: 'Password has been reset successfully.' });
   } catch (error) {
@@ -338,7 +341,9 @@ router.post('/reset-password', validate(resetPasswordSchema), async (req, res, n
 const auth = require('../middleware/auth');
 router.get('/me', auth, async (req, res, next) => {
   try {
-    const user = await User.findById(req.user.id);
+    // Retain the authentication snapshot/version. Re-reading a newer version
+    // here could renew a pre-reset token across a concurrent password reset.
+    const user = req.user;
     if (!user) {
       return res.status(404).json({ error: { code: 'API_ERROR', message: 'User not found' } });
     }
@@ -349,7 +354,8 @@ router.get('/me', auth, async (req, res, next) => {
       email: user.email,
       username: user.username,
       role: user.role,
-      isAdmin: user.isAdmin
+      isAdmin: user.isAdmin,
+      ver: user.tokenVersion || 0
     });
 
     res.json({
@@ -401,7 +407,7 @@ router.put('/profile', auth, validate(profileUpdateSchema), async (req, res, nex
     }
     await user.save();
 
-    res.json(user);
+    res.json(publicUser(user));
   } catch (error) {
     next(error);
   }

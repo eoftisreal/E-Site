@@ -70,6 +70,7 @@ const orderSchema = new mongoose.Schema(
     },
     timeline: [timelineSchema],
     adminRemark: { type: String, default: '' },
+    stockRestored: { type: Boolean, default: false },
     checkoutAttemptId: { type: String, unique: true, sparse: true },
   },
   { timestamps: true }
