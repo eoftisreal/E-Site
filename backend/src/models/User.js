@@ -12,6 +12,8 @@ const userSchema = new mongoose.Schema(
       match: [/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores (no spaces)']
     },
     password: { type: String },
+    tokenVersion: { type: Number, default: 0 },
+    checkoutSequence: { type: Number, default: 0 },
     name: { type: String, trim: true },
     role: { type: String, enum: ['user', 'admin', 'master_admin'], default: 'user' },
     isAdmin: { type: Boolean, default: false },
@@ -28,7 +30,17 @@ const userSchema = new mongoose.Schema(
     },
     masterAccessCode: { type: String, unique: true, sparse: true }
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: {
+      transform(_doc, value) {
+        for (const key of ['password', 'verificationToken', 'masterAccessCode', 'tokenVersion', 'checkoutSequence']) {
+          delete value[key];
+        }
+        return value;
+      }
+    }
+  }
 );
 
 module.exports = mongoose.model('User', userSchema);

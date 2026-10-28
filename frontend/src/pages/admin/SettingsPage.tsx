@@ -115,11 +115,15 @@ export default function SettingsPage() {
         };
       });
 
-      const XLSX = await import('xlsx');
-      const ws = XLSX.utils.json_to_sheet(exportData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Orders");
-      XLSX.writeFile(wb, `Orders_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
+      const { default: writeExcelFile } = await import('write-excel-file/browser');
+      const columns = Object.keys(exportData[0]);
+      // String cells remain strings, including customer-supplied '=...' content.
+      // Never treat customer names, addresses or remarks as spreadsheet formulas.
+      const rows = [columns, ...exportData.map((row: Record<string, string | number>) =>
+        columns.map(key => row[key])
+      )];
+      await writeExcelFile(rows, { sheet: 'Orders' })
+        .toFile(`Orders_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
 
     } catch (err: any) {
       alert(`Export failed: ${err.message}`);

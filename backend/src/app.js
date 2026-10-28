@@ -2,8 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
-const env = require('./config/env');
 const healthRoutes = require('./routes/health');
 const authRoutes = require('./routes/auth');
 const productRoutes = require('./routes/products');
@@ -23,33 +21,17 @@ const compressionMiddleware = require('./middleware/compression');
 const cacheMiddleware = require('./middleware/cache');
 const queryOptimizationMiddleware = require('./middleware/queryOptimization');
 
-const { globalLimiter, apiLimiter, authLimiter, uploadLimiter, readOperationLimiter, writeOperationLimiter, skipPreflight } = require('./middleware/rateLimiter');
+const { accountLimiter, globalLimiter, authLimiter, uploadLimiter, readOperationLimiter, writeOperationLimiter } = require('./middleware/rateLimiter');
 
 const app = express();
 
-// Trust the proxy since the app is deployed behind Appwrite's load balancer or DigitalOcean's
-// Trust all proxies in the chain to accurately resolve the client IP
-app.set('trust proxy', true);
-
-// Security headers
+const security = require('./config/security');
+app.set('trust proxy', security.trustProxy);
 app.use(helmet({
-  contentSecurityPolicy: false,
-  crossOriginResourcePolicy: { policy: "cross-origin" }
+  contentSecurityPolicy: security.csp,
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
-
-// CORS - More permissive for Appwrite deployments
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Always allow origin (this is safe as auth uses Bearer JWTs in headers)
-    callback(null, true);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  maxAge: 86400
-};
-
-app.use(cors(corsOptions));
+app.use(cors(security.cors));
 
 // Health check should bypass DB check if it doesn't strictly need it, or we can just mount dbCheck after it
 // Wait, the user specifically said: "Keep database-independent liveness routes accessible."
@@ -74,7 +56,7 @@ app.use('/api/', responseCacheMiddleware);
 
 // API rate limiting
 app.use('/api/', (req, res, next) => {
-  if (req.method === 'OPTIONS') return next();
+  if (req.method === 'OPTIONS' || req.path.replace(/\/$/, '') === '/health') return next();
   if (req.method === 'GET') {
     return readOperationLimiter(req, res, next);
   }
@@ -83,7 +65,10 @@ app.use('/api/', (req, res, next) => {
   }
   next();
 });
+// Parse bounded JSON before account-based throttling.
+app.use(express.json({ limit: '2mb' }));
 app.use('/api/auth/login', authLimiter);
+app.use('/api/auth', accountLimiter);
 app.use('/api/auth/signup', authLimiter);
 app.use('/api/auth/forgot-password', authLimiter);
 app.use('/api/auth/reset-password', authLimiter);
@@ -93,8 +78,6 @@ app.use('/api/checkout', authLimiter);
 app.use('/api/products/upload-custom', uploadLimiter);
 app.use('/api/admin/upload', uploadLimiter);
 
-// Body parsing
-app.use(express.json({ limit: '2mb' }));
 
 // Logging
 const customLogger = require('./middleware/logger');
@@ -105,7 +88,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Global rate limiting
-app.use(globalLimiter);
+app.use('/api', (req, res, next) => req.path.replace(/\/$/, '') === '/health' ? next() : globalLimiter(req, res, next));
 
 // API Routes
 app.use('/api', healthRoutes);

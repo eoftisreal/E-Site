@@ -37,6 +37,7 @@ async function connectDb() {
       maxIdleTimeMS: Number(process.env.MONGO_MAX_IDLE_TIME_MS || 30000),
       waitQueueTimeoutMS: Number(process.env.MONGO_WAIT_QUEUE_TIMEOUT_MS || 10000),
     });
+    await mongoose.connection.collection('rate_limits').createIndex({ resetAt: 1 }, { expireAfterSeconds: 0 });
   } catch (error) {
     const wrappedError = new Error(`Failed to connect to MongoDB at ${maskMongoUri(env.mongoUri)}: ${error.message}`);
     wrappedError.statusCode = 500;

@@ -1,3 +1,4 @@
+jest.mock('../src/utils/orderTransitions', () => ({ releaseExpiredReservations: jest.fn(async () => {}) }));
 jest.mock('../src/middleware/auth', () => (req, _res, next) => {
   req.user = { id: 'user-id', isAdmin: true };
   next();

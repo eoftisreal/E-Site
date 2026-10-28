@@ -6,11 +6,12 @@ const multer = require('multer');
 const Order = require('../models/Order');
 const User = require('../models/User');
 const Setting = require('../models/Setting');
-const OrderStatusHistory = require('../models/OrderStatusHistory');
 const { getAdminSettings } = require('../utils/admin');
 const { invalidateCache, getSettings } = require('../utils/settingsCache');
 const { sendOrderConfirmationEmail } = require('../utils/sendEmail');
 
+const { transitionOrder } = require('../utils/orderTransitions');
+const publicUser = require('../utils/publicUser');
 const router = express.Router();
 
 function masterAdminOnly(req, _res, next) {
@@ -28,6 +29,8 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: 5 * 1024 * 1024, // 5MB limit
+    files: 1, fields: 10, parts: 11, fieldSize: 16 * 1024,
+    fieldNameSize: 100, fieldNestingDepth: 4,
   },
 });
 
@@ -39,10 +42,10 @@ router.get('/analytics', async (_req, res, next) => {
     const [totalProducts, totalOrders, revenueData, recentOrders, revenueTimelineRaw] = await Promise.all([
       Product.countDocuments(),
       Order.countDocuments(),
-      Order.aggregate([{ $group: { _id: null, revenue: { $sum: '$total' } } }]),
+      Order.aggregate([{ $match: { 'payment.status': 'captured' } }, { $group: { _id: null, revenue: { $sum: '$total' } } }]),
       Order.find().sort({ createdAt: -1 }).limit(10).populate('userId', 'email').select('total status createdAt'),
       Order.aggregate([
-        { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+        { $match: { createdAt: { $gte: thirtyDaysAgo }, 'payment.status': 'captured' } },
         {
           $group: {
             _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
@@ -112,7 +115,7 @@ router.get('/users', masterAdminOnly, async (req, res, next) => {
   try {
     const filter = req.query.role ? { role: req.query.role } : {};
     const users = await User.find(filter).select('-password');
-    res.json(users);
+    res.json(users.map(publicUser));
   } catch (error) {
     next(error);
   }
@@ -139,7 +142,7 @@ router.put('/users/:id/role', masterAdminOnly, async (req, res, next) => {
     }
     const user = await User.findByIdAndUpdate(req.params.id, { role, isAdmin: role !== 'user' }, { new: true }).select('-password');
     if (!user) return res.status(404).json({ error: { code: 'API_ERROR', message: 'User not found' } });
-    res.json(user);
+    res.json(publicUser(user));
   } catch (error) {
     next(error);
   }
@@ -225,43 +228,9 @@ router.post('/delete-image', async (req, res, next) => {
   }
 });
 
-router.post('/orders/:id/approve', async (req, res, next) => {
+router.post('/orders/:id/approve', masterAdminOnly, async (req, res, next) => {
   try {
-    const order = await Order.findById(req.params.id).populate('userId', 'email');
-    if (!order) {
-      const err = new Error('Order not found');
-      err.statusCode = 404;
-      throw err;
-    }
-
-    if (order.status !== 'awaiting_verification') {
-      const err = new Error('Order is not awaiting verification');
-      err.statusCode = 400;
-      throw err;
-    }
-
-    const oldStatus = order.status;
-    order.status = 'payment_verified';
-    order.payment.status = 'captured';
-    order.timeline.push({ status: 'payment_verified', note: 'Payment successfully verified' });
-    await order.save();
-
-    // Increment sales count for each product in the order
-    if (order.items && order.items.length > 0) {
-      for (const item of order.items) {
-        if (item.productId) {
-          await Product.findByIdAndUpdate(item.productId, { $inc: { salesCount: item.quantity } });
-        }
-      }
-    }
-
-    await OrderStatusHistory.create({
-      orderId: order._id,
-      oldStatus,
-      newStatus: 'payment_verified',
-      changedBy: req.user.id,
-      note: 'Admin approved payment'
-    });
+    const order = await transitionOrder(req.params.id, 'payment_verified', req.user, { expectedStatus: 'awaiting_verification' });
 
     // Send order confirmation email asynchronously
     let targetEmail = null;
@@ -290,34 +259,9 @@ router.post('/orders/:id/approve', async (req, res, next) => {
   }
 });
 
-router.post('/orders/:id/reject', async (req, res, next) => {
+router.post('/orders/:id/reject', masterAdminOnly, async (req, res, next) => {
   try {
-    const order = await Order.findById(req.params.id);
-    if (!order) {
-      const err = new Error('Order not found');
-      err.statusCode = 404;
-      throw err;
-    }
-
-    if (order.status !== 'awaiting_verification') {
-      const err = new Error('Order is not awaiting verification');
-      err.statusCode = 400;
-      throw err;
-    }
-
-    const oldStatus = order.status;
-    order.status = 'rejected';
-    order.payment.status = 'failed';
-    order.timeline.push({ status: 'rejected', note: 'Payment rejected by admin' });
-    await order.save();
-
-    await OrderStatusHistory.create({
-      orderId: order._id,
-      oldStatus,
-      newStatus: 'rejected',
-      changedBy: req.user.id,
-      note: 'Admin rejected payment'
-    });
+    const order = await transitionOrder(req.params.id, 'rejected', req.user, { expectedStatus: 'awaiting_verification' });
 
     res.json(order);
   } catch (error) {
@@ -352,7 +296,7 @@ router.get('/orders/export', masterAdminOnly, async (req, res, next) => {
       };
     }
 
-    const orders = await Order.find(filter).populate('userId').sort({ createdAt: -1 });
+    const orders = await Order.find(filter).populate('userId', 'email name phone').sort({ createdAt: -1 });
     res.json(orders);
   } catch (error) {
     next(error);
@@ -361,86 +305,7 @@ router.get('/orders/export', masterAdminOnly, async (req, res, next) => {
 
 router.put('/orders/:id/status', async (req, res, next) => {
   try {
-    const { status } = req.body;
-    const validStatuses = [
-      'pending_payment',
-      'awaiting_verification',
-      'payment_verified',
-      'rejected',
-      'processing',
-      'shipped',
-      'delivered',
-      'cancelled'
-    ];
-
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ error: { code: 'API_ERROR', message: 'Invalid status' } });
-    }
-
-    const order = await Order.findById(req.params.id);
-    if (!order) {
-      return res.status(404).json({ error: { code: 'API_ERROR', message: 'Order not found' } });
-    }
-
-    const oldStatus = order.status;
-
-    // Validation: masterAdminOnly for payment statuses
-    const paymentStatuses = ['pending_payment', 'awaiting_verification', 'payment_verified', 'rejected'];
-    if (paymentStatuses.includes(status) && req.user.role !== 'master_admin') {
-      return res.status(403).json({ error: { code: 'API_ERROR', message: 'Only superadmins can modify payment status' } });
-    }
-
-    // Validation: shipping statuses only allowed if payment is verified (or beyond)
-    const shippingStatuses = ['processing', 'shipped', 'delivered', 'cancelled'];
-    const requiresPaymentVerified = ['processing', 'shipped', 'delivered'];
-    if (requiresPaymentVerified.includes(status)) {
-       const hasBeenVerified = order.timeline.some(t => t.status === 'payment_verified') || order.status === 'payment_verified' || ['processing', 'shipped', 'delivered'].includes(order.status);
-       if (!hasBeenVerified) {
-          return res.status(400).json({ error: { code: 'API_ERROR', message: 'Cannot update shipping status until payment is approved' } });
-       }
-    }
-
-    // Don't do anything if the status is the same
-    if (oldStatus === status) {
-      return res.json(order);
-    }
-
-    order.status = status;
-
-    if (status === 'cancelled') {
-      order.payment.status = 'cancelled';
-    } else if (status === 'rejected') {
-      order.payment.status = 'failed';
-    }
-
-    let note;
-    if (['processing', 'shipped', 'delivered'].includes(status)) {
-      note = `Order status updated to ${status}`;
-    } else {
-      note = `Status updated to ${status} by admin`;
-    }
-    order.timeline.push({ status, note });
-    await order.save();
-
-    // Increment sales count for each product in the order if payment is just verified
-    if (status === 'payment_verified') {
-      if (order.items && order.items.length > 0) {
-        for (const item of order.items) {
-          if (item.productId) {
-            await Product.findByIdAndUpdate(item.productId, { $inc: { salesCount: item.quantity } });
-          }
-        }
-      }
-    }
-
-    await OrderStatusHistory.create({
-      orderId: order._id,
-      oldStatus,
-      newStatus: status,
-      changedBy: req.user.id,
-      note: `Admin changed status from ${oldStatus} to ${status}`
-    });
-
+    const order = await transitionOrder(req.params.id, req.body.status, req.user);
     res.json(order);
   } catch (error) {
     next(error);

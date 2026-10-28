@@ -13,6 +13,7 @@ const Product = require('../models/Product');
 const { getSettings } = require('../utils/settingsCache');
 const { sendOrderConfirmationEmail } = require('../utils/sendEmail');
 
+const { releaseExpiredReservations } = require('../utils/orderTransitions');
 const router = express.Router();
 
 async function generateUniquePaymentAmount(baseTotal, session) {
@@ -85,6 +86,7 @@ router.post('/create', auth, validate(checkoutSchema), async (req, res, next) =>
       }
     }
 
+    await releaseExpiredReservations();
     let finalOrder;
     let attempts = 0;
 
@@ -109,6 +111,16 @@ router.post('/create', auth, validate(checkoutSchema), async (req, res, next) =>
               finalOrder = existingOrder;
               return;
             }
+          }
+
+          // Serialize checkouts for this user so concurrent requests cannot bypass
+          // the outstanding-unpaid-order cap.
+          await User.updateOne({ _id: req.user.id }, { $inc: { checkoutSequence: 1 } }, { session });
+          const outstanding = await Order.countDocuments({
+            userId: req.user.id, status: { $in: ['pending_payment', 'awaiting_verification'] }
+          }).session(session);
+          if (outstanding >= 3) {
+            throw Object.assign(new Error('Please complete or cancel your existing unpaid orders first'), { statusCode: 409 });
           }
 
           // 2. Fetch and validate cart or direct buy item INSIDE the transaction
